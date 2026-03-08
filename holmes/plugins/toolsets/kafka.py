@@ -1,4 +1,7 @@
+import base64
 import logging
+import os
+import tempfile
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -21,7 +24,7 @@ from confluent_kafka.admin import (
     TopicMetadata,
 )
 from confluent_kafka.admin import _TopicPartition as TopicPartition
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, PrivateAttr
 
 from holmes.core.tools import (
     CallablePrerequisite,
@@ -92,6 +95,42 @@ class KafkaClusterConfig(ToolsetConfig):
         default="holmes-kafka-client",
         title="Client ID",
         description="Client ID for Kafka connections",
+    )
+    ssl_ca_cert: Optional[str] = Field(
+        default=None,
+        title="SSL CA Certificate",
+        description="CA certificate in PEM format, base64-encoded (e.g., output of 'cat ca.crt | base64 -w 0')",
+        examples=["LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURYVENDQWtXZ0F3SUJBZ0lVZjJxdDN3..."],
+    )
+    ssl_client_cert: Optional[str] = Field(
+        default=None,
+        title="SSL Client Certificate",
+        description="Client certificate in PEM format, base64-encoded (e.g., output of 'cat tls.crt | base64 -w 0')",
+        examples=["LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURZVENDQWttZ0F3SUJBZ0lVZjJxdDN3..."],
+    )
+    ssl_client_key: Optional[str] = Field(
+        default=None,
+        title="SSL Client Key",
+        description="Client private key in PEM format, base64-encoded (e.g., output of 'cat tls.key | base64 -w 0')",
+        examples=["LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUVwQUlCQWtJQkFRS0NBUUVBM..."],
+    )
+    ssl_ca_cert_path: Optional[str] = Field(
+        default=None,
+        title="SSL CA Certificate Path",
+        description="Path to CA certificate file (for mounted certificates)",
+        examples=["/etc/kafka/ssl/ca.crt"],
+    )
+    ssl_client_cert_path: Optional[str] = Field(
+        default=None,
+        title="SSL Client Certificate Path",
+        description="Path to client certificate file (for mounted certificates)",
+        examples=["/etc/kafka/ssl/tls.crt"],
+    )
+    ssl_client_key_path: Optional[str] = Field(
+        default=None,
+        title="SSL Client Key Path",
+        description="Path to client private key file (for mounted certificates)",
+        examples=["/etc/kafka/ssl/tls.key"],
     )
 
 
@@ -211,6 +250,7 @@ class ListKafkaConsumers(BaseKafkaTool):
         )
 
     def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+        """List all Kafka consumer groups in the specified cluster."""
         try:
             kafka_cluster_name = get_param_or_raise(params, "kafka_cluster_name")
             client = self.get_kafka_client(kafka_cluster_name)
@@ -259,6 +299,7 @@ class ListKafkaConsumers(BaseKafkaTool):
             )
 
     def get_parameterized_one_liner(self, params: Dict) -> str:
+        """Generate a one-liner description for the list consumer groups operation."""
         cluster = params.get("kafka_cluster_name", "")
         return f"{toolset_name_for_one_liner(self.toolset.name)}: List Consumer Groups ({cluster})"
 
@@ -284,6 +325,7 @@ class DescribeConsumerGroup(BaseKafkaTool):
         )
 
     def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+        """Describe a specific Kafka consumer group with detailed metadata and member information."""
         group_id = params["group_id"]
         try:
             kafka_cluster_name = get_param_or_raise(params, "kafka_cluster_name")
@@ -320,6 +362,7 @@ class DescribeConsumerGroup(BaseKafkaTool):
             )
 
     def get_parameterized_one_liner(self, params: Dict) -> str:
+        """Generate a one-liner description for the describe consumer group operation."""
         group_id = params.get("group_id", "")
         return f"{toolset_name_for_one_liner(self.toolset.name)}: Describe Consumer Group ({group_id})"
 
@@ -340,6 +383,7 @@ class ListTopics(BaseKafkaTool):
         )
 
     def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+        """List all Kafka topics in the specified cluster."""
         try:
             kafka_cluster_name = get_param_or_raise(params, "kafka_cluster_name")
             client = self.get_kafka_client(kafka_cluster_name)
@@ -366,6 +410,7 @@ class ListTopics(BaseKafkaTool):
             )
 
     def get_parameterized_one_liner(self, params: Dict) -> str:
+        """Generate a one-liner description for the list topics operation."""
         cluster = params.get("kafka_cluster_name", "")
         return f"{toolset_name_for_one_liner(self.toolset.name)}: List Kafka Topics ({cluster})"
 
@@ -396,6 +441,7 @@ class DescribeTopic(BaseKafkaTool):
         )
 
     def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+        """Describe a specific Kafka topic with partition and configuration details."""
         topic_name = params["topic_name"]
         try:
             kafka_cluster_name = get_param_or_raise(params, "kafka_cluster_name")
@@ -436,6 +482,7 @@ class DescribeTopic(BaseKafkaTool):
             )
 
     def get_parameterized_one_liner(self, params: Dict) -> str:
+        """Generate a one-liner description for the describe topic operation."""
         topic = params.get("topic_name", "")
         return (
             f"{toolset_name_for_one_liner(self.toolset.name)}: Describe Topic ({topic})"
@@ -449,6 +496,7 @@ def group_has_topic(
     bootstrap_servers: str,
     topic_metadata: Any,
 ):
+    """Check if a consumer group has any members or committed offsets for a specific topic."""
     # Check active member assignments
     for member in consumer_group_description.members:
         for topic_partition in member.assignment.topic_partitions:
@@ -519,6 +567,7 @@ class FindConsumerGroupsByTopic(BaseKafkaTool):
         )
 
     def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+        """Find all consumer groups that are consuming from a specific topic."""
         topic_name = params["topic_name"]
         try:
             kafka_cluster_name = get_param_or_raise(params, "kafka_cluster_name")
@@ -593,6 +642,7 @@ class FindConsumerGroupsByTopic(BaseKafkaTool):
             )
 
     def get_parameterized_one_liner(self, params: Dict) -> str:
+        """Generate a one-liner description for the find consumer groups by topic operation."""
         topic = params.get("topic_name", "")
         return f"{toolset_name_for_one_liner(self.toolset.name)}: Find Topic Consumers ({topic})"
 
@@ -607,6 +657,7 @@ class ListKafkaClusters(BaseKafkaTool):
         )
 
     def _invoke(self, params: dict, context: ToolInvokeContext) -> StructuredToolResult:
+        """List all available Kafka clusters configured in HolmesGPT."""
         cluster_names = list(self.toolset.clients.keys())
         return StructuredToolResult(
             status=StructuredToolResultStatus.SUCCESS,
@@ -615,6 +666,7 @@ class ListKafkaClusters(BaseKafkaTool):
         )
 
     def get_parameterized_one_liner(self, params: Dict) -> str:
+        """Generate a one-liner description for the list clusters operation."""
         return f"{toolset_name_for_one_liner(self.toolset.name)}: List Kafka Clusters"
 
 
@@ -624,6 +676,7 @@ class KafkaToolset(Toolset):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     clients: Dict[str, AdminClient] = {}
     kafka_config: Optional[KafkaConfig] = None
+    _temp_cert_paths: List[str] = PrivateAttr(default_factory=list)
 
     def __init__(self):
         super().__init__(
@@ -642,6 +695,123 @@ class KafkaToolset(Toolset):
                 FindConsumerGroupsByTopic(self),
             ],
         )
+
+    def _configure_ssl_certificates(self, cluster: KafkaClusterConfig, admin_config: Dict[str, Any]) -> None:
+        """
+        Configure SSL/TLS certificates for Kafka connection.
+        Supports both mounted certificate paths and base64-encoded certificate content.
+        Temporary file paths are stored in self._temp_cert_paths for cleanup.
+        """
+        temp_cert_paths = []
+
+        # Check if any SSL configuration is provided
+        has_ssl_config = any([
+            cluster.ssl_ca_cert,
+            cluster.ssl_client_cert,
+            cluster.ssl_client_key,
+            cluster.ssl_ca_cert_path,
+            cluster.ssl_client_cert_path,
+            cluster.ssl_client_key_path,
+        ])
+
+        if not has_ssl_config:
+            return
+
+        # Set security protocol if not already set
+        if "security.protocol" not in admin_config:
+            # Check if SASL is configured
+            has_sasl = any(key.startswith("sasl.") for key in admin_config.keys())
+            # Use SASL_SSL if SASL is configured, otherwise use SSL
+            admin_config["security.protocol"] = "SASL_SSL" if has_sasl else "SSL"
+
+        # Handle CA certificate
+        if cluster.ssl_ca_cert_path:
+            # Use mounted certificate path
+            admin_config["ssl.ca.location"] = cluster.ssl_ca_cert_path
+        elif cluster.ssl_ca_cert:
+            # Write base64-encoded certificate to temporary file
+            try:
+                cert_content = base64.b64decode(cluster.ssl_ca_cert).decode('utf-8')
+                temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.crt', delete=False)
+                temp_file.write(cert_content)
+                temp_file.close()
+                admin_config["ssl.ca.location"] = temp_file.name
+                temp_cert_paths.append(temp_file.name)
+                logging.debug(f"Created temporary CA certificate file: {temp_file.name}")
+            except Exception as e:
+                raise ValueError(
+                    f"Failed to process ssl_ca_cert for cluster '{cluster.name}': "
+                    f"Could not decode base64-encoded CA certificate. "
+                    f"Ensure the certificate is properly base64-encoded (use 'base64 -w 0' to avoid line breaks)."
+                ) from e
+
+        # Handle client certificate
+        if cluster.ssl_client_cert_path:
+            # Use mounted certificate path
+            admin_config["ssl.certificate.location"] = cluster.ssl_client_cert_path
+        elif cluster.ssl_client_cert:
+            # Write base64-encoded certificate to temporary file
+            try:
+                cert_content = base64.b64decode(cluster.ssl_client_cert).decode('utf-8')
+                temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.crt', delete=False)
+                temp_file.write(cert_content)
+                temp_file.close()
+                admin_config["ssl.certificate.location"] = temp_file.name
+                temp_cert_paths.append(temp_file.name)
+                logging.debug(f"Created temporary client certificate file: {temp_file.name}")
+            except Exception as e:
+                raise ValueError(
+                    f"Failed to process ssl_client_cert for cluster '{cluster.name}': "
+                    f"Could not decode base64-encoded client certificate. "
+                    f"Ensure the certificate is properly base64-encoded (use 'base64 -w 0' to avoid line breaks)."
+                ) from e
+
+        # Handle client private key
+        if cluster.ssl_client_key_path:
+            # Use mounted key path
+            admin_config["ssl.key.location"] = cluster.ssl_client_key_path
+        elif cluster.ssl_client_key:
+            # Write base64-encoded key to temporary file
+            try:
+                key_content = base64.b64decode(cluster.ssl_client_key).decode('utf-8')
+                temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False)
+                temp_file.write(key_content)
+                temp_file.close()
+                os.chmod(temp_file.name, 0o600)  # Restrict permissions for security
+                admin_config["ssl.key.location"] = temp_file.name
+                temp_cert_paths.append(temp_file.name)
+                logging.debug(f"Created temporary client key file: {temp_file.name}")
+            except Exception as e:
+                raise ValueError(
+                    f"Failed to process ssl_client_key for cluster '{cluster.name}': "
+                    f"Could not decode base64-encoded client private key. "
+                    f"Ensure the key is properly base64-encoded (use 'base64 -w 0' to avoid line breaks)."
+                ) from e
+
+        # Persist temporary file paths for cleanup
+        self._temp_cert_paths.extend(temp_cert_paths)
+
+    def _cleanup_temp_certificates(self) -> None:
+        """
+        Clean up temporary certificate files created during SSL/TLS configuration.
+        Removes all temporary files and clears the tracking list.
+        """
+        for file_path in self._temp_cert_paths:
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    logging.debug(f"Removed temporary certificate file: {file_path}")
+            except Exception as e:
+                logging.warning(f"Failed to remove temporary certificate file {file_path}: {str(e)}")
+        
+        self._temp_cert_paths.clear()
+
+    def __del__(self) -> None:
+        """Clean up temporary certificate files when the toolset is destroyed."""
+        try:
+            self._cleanup_temp_certificates()
+        except Exception as e:
+            logging.warning(f"Error during KafkaToolset cleanup: {str(e)}")
 
     def prerequisites_callable(self, config: Dict[str, Any]) -> Tuple[bool, str]:
         if not config:
@@ -668,6 +838,9 @@ class KafkaToolset(Toolset):
                     if cluster.username and cluster.password:
                         admin_config["sasl.username"] = cluster.username
                         admin_config["sasl.password"] = cluster.password
+
+                    # Handle SSL/TLS certificate configuration
+                    self._configure_ssl_certificates(cluster, admin_config)
 
                     client = AdminClient(admin_config)
                     # Test the connection by trying to list topics with a timeout

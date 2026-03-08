@@ -1,4 +1,4 @@
-{{- if or (.Values.toolsets | not | empty) .Values.mcpAddons.aws.enabled .Values.mcpAddons.mariadb.enabled .Values.mcpAddons.gcp.enabled .Values.mcpAddons.azure.enabled .Values.mcpAddons.github.enabled .Values.mcpAddons.sentry.enabled .Values.mcpAddons.prefect.enabled .Values.mcpAddons.kubernetesRemediation.enabled .Values.mcpAddons.confluenceMcp.enabled }}
+{{- if or (.Values.toolsets | not | empty) .Values.mcpAddons.aws.enabled .Values.mcpAddons.mariadb.enabled .Values.mcpAddons.gcp.enabled .Values.mcpAddons.azure.enabled .Values.mcpAddons.github.enabled .Values.mcpAddons.sentry.enabled .Values.mcpAddons.prefect.enabled .Values.mcpAddons.kubernetesRemediation.enabled .Values.mcpAddons.confluenceMcp.enabled .Values.kafkaSSL.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,6 +6,41 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   custom_toolset.yaml: |-
+    {{- if .Values.kafkaSSL.enabled }}
+    {{- $kafkaConfig := dict }}
+    {{- if .Values.kafkaSSL.useMountedCertificates }}
+    {{- $kafkaConfig = dict
+        "name" "kafka"
+        "enabled" true
+        "clusters" (list (dict
+          "name" "default-kafka-cluster"
+          "broker" "kafka-broker:9092"
+          "security_protocol" "SSL"
+          "ssl_ca_cert_path" (printf "%s/ca.crt" .Values.kafkaSSL.mountPath)
+          "ssl_client_cert_path" (printf "%s/tls.crt" .Values.kafkaSSL.mountPath)
+          "ssl_client_key_path" (printf "%s/tls.key" .Values.kafkaSSL.mountPath)
+        ))
+    }}
+    {{- else }}
+    {{- if and .Values.kafkaSSL.caSecret.name .Values.kafkaSSL.clientSecret.name }}
+    {{- $kafkaConfig = dict
+        "name" "kafka"
+        "enabled" true
+        "clusters" (list (dict
+          "name" "default-kafka-cluster"
+          "broker" "kafka-broker:9092"
+          "security_protocol" "SSL"
+          "ssl_ca_cert" (printf "{{ env.KAFKA_CA_CERT_BASE64 }}")
+          "ssl_client_cert" (printf "{{ env.KAFKA_CLIENT_CERT_BASE64 }}")
+          "ssl_client_key" (printf "{{ env.KAFKA_CLIENT_KEY_BASE64 }}")
+        ))
+    }}
+    {{- end }}
+    {{- end }}
+    {{- if $kafkaConfig }}
+    kafka: {{ toYaml $kafkaConfig | nindent 6 }}
+    {{- end }}
+    {{- end }}
     toolsets: {{ toYaml .Values.toolsets | nindent 6 }}
     {{- $mcpServers := .Values.mcp_servers }}
     {{- if .Values.mcpAddons.aws.enabled }}

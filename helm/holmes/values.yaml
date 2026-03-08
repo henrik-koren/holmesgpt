@@ -71,6 +71,63 @@ toolsets:
     enabled: true
     config:
       builtin_allowlist: "extended"
+  # Kafka Toolset Configuration
+  # To enable Kafka cluster access with SSL/TLS:
+  # 1. Set kafkaSSL.enabled=true below to enable SSL support
+  # 2. Configure your Kafka clusters here with broker addresses and SSL certificate paths
+  # 3. If using mounted certificates (kafkaSSL.useMountedCertificates=true), use ssl_*_path fields
+  # 4. If using base64-encoded certificates (kafkaSSL.useMountedCertificates=false), use ssl_* fields with env vars
+  # kafka:
+  #   enabled: true
+  #   clusters:
+  #     - name: "my-kafka-cluster"
+  #       broker: "kafka-broker.example.com:9092"
+  #       security_protocol: "SSL"
+  #       # Option 1: Use mounted certificates (requires kafkaSSL.useMountedCertificates=true)
+  #       ssl_ca_cert_path: "/etc/kafka/ssl/ca.crt"
+  #       ssl_client_cert_path: "/etc/kafka/ssl/tls.crt"
+  #       ssl_client_key_path: "/etc/kafka/ssl/tls.key"
+  #       # Option 2: Use base64-encoded certificates (requires kafkaSSL.useMountedCertificates=false)
+  #       # ssl_ca_cert: "{{ env.KAFKA_CA_CERT_BASE64 }}"
+  #       # ssl_client_cert: "{{ env.KAFKA_CLIENT_CERT_BASE64 }}"
+  #       # ssl_client_key: "{{ env.KAFKA_CLIENT_KEY_BASE64 }}"
+
+# Kafka SSL Certificate Configuration
+# This section controls how SSL certificates are provided to the Kafka toolset.
+# It works in conjunction with toolsets.kafka.clusters[*].ssl_* configuration above.
+# 
+# Usage:
+# - Set enabled=true to activate Kafka SSL support
+# - Set useMountedCertificates=true to use certificates from Kubernetes secrets mounted as volumes
+# - Set useMountedCertificates=false to use base64-encoded certificates from ConfigMap
+#
+# When useMountedCertificates=true:
+#   - Certificates are mounted from K8s secrets at mountPath
+#   - Use ssl_ca_cert_path, ssl_client_cert_path, ssl_client_key_path in toolsets.kafka.clusters
+#   - Requires caSecret.name and clientSecret.name to be set
+#
+# When useMountedCertificates=false:
+#   - Certificates are base64-encoded and passed via environment variables
+#   - Use ssl_ca_cert, ssl_client_cert, ssl_client_key in toolsets.kafka.clusters with env var references
+#   - Requires caSecret.name and clientSecret.name to be set (for secret data extraction)
+kafkaSSL:
+  enabled: false
+  # Use mounted volumes (recommended for production)
+  # Set to false to use base64-encoded certificates in ConfigMap
+  useMountedCertificates: true
+  # Base path for mounted certificates (only used when useMountedCertificates=true)
+  mountPath: "/etc/kafka/ssl"
+  # Kubernetes secrets containing certificates
+  # Create secrets with: kubectl create secret tls kafka-client-certs --cert=tls.crt --key=tls.key
+  #                      kubectl create secret generic kafka-ca-cert --from-file=ca.crt=ca.crt
+  caSecret:
+    name: ""  # Name of K8s secret containing CA certificate (required when kafkaSSL.enabled=true)
+    key: "ca.crt"  # Key in secret for CA certificate
+  clientSecret:
+    name: ""  # Name of K8s secret containing client certificate and key (required when kafkaSSL.enabled=true)
+    certKey: "tls.crt"  # Key in secret for client certificate
+    keyKey: "tls.key"  # Key in secret for client private key
+
 mcp_servers: {}
 
 resources:

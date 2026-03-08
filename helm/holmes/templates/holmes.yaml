@@ -100,6 +100,22 @@ spec:
             mountPath: /etc/robusta/config
           - name: custom-toolsets-configmap
             mountPath: /etc/holmes/config
+          {{- if and .Values.kafkaSSL.enabled .Values.kafkaSSL.useMountedCertificates .Values.kafkaSSL.caSecret.name }}
+          - name: kafka-ca-cert
+            mountPath: {{ .Values.kafkaSSL.mountPath }}/ca.crt
+            subPath: {{ .Values.kafkaSSL.caSecret.key }}
+            readOnly: true
+          {{- end }}
+          {{- if and .Values.kafkaSSL.enabled .Values.kafkaSSL.useMountedCertificates .Values.kafkaSSL.clientSecret.name }}
+          - name: kafka-client-cert
+            mountPath: {{ .Values.kafkaSSL.mountPath }}/tls.crt
+            subPath: {{ .Values.kafkaSSL.clientSecret.certKey }}
+            readOnly: true
+          - name: kafka-client-key
+            mountPath: {{ .Values.kafkaSSL.mountPath }}/tls.key
+            subPath: {{ .Values.kafkaSSL.clientSecret.keyKey }}
+            readOnly: true
+          {{- end }}
           {{- if .Values.additionalVolumeMounts -}}
           {{ toYaml .Values.additionalVolumeMounts | nindent 10 }}
           {{- end }}
@@ -125,6 +141,22 @@ spec:
           configMap:
             name: custom-toolsets-configmap
             optional: true
+        {{- if and .Values.kafkaSSL.enabled .Values.kafkaSSL.useMountedCertificates .Values.kafkaSSL.caSecret.name }}
+        - name: kafka-ca-cert
+          secret:
+            secretName: {{ .Values.kafkaSSL.caSecret.name }}
+            optional: true
+        {{- end }}
+        {{- if and .Values.kafkaSSL.enabled .Values.kafkaSSL.useMountedCertificates .Values.kafkaSSL.clientSecret.name }}
+        - name: kafka-client-cert
+          secret:
+            secretName: {{ .Values.kafkaSSL.clientSecret.name }}
+            optional: true
+        - name: kafka-client-key
+          secret:
+            secretName: {{ .Values.kafkaSSL.clientSecret.name }}
+            optional: true
+        {{- end }}
         {{- if .Values.additionalVolumes -}}
         {{ toYaml .Values.additionalVolumes | nindent 8 }}
         {{- end }}

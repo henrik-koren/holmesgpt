@@ -478,9 +478,17 @@ def select_toolset(toolsets: List[Toolset], console: Console) -> Optional[Toolse
     items: List[str] = []
     items.append(f"Add MCP Server - {_MCP_SERVER_DOCS_URL}")
     for t in toolsets:
-        status_tag = t.status.value if t.status else "disabled"
-        has_config = "configured" if t.config else "unconfigured"
-        items.append(f"{t.name:<35} [{status_tag}] ({has_config})")
+        raw_status = t.status.value if t.status else "disabled"
+        is_configured = getattr(t, "enabled", False)
+        if raw_status == "enabled":
+            merged_status = "enabled"
+        elif raw_status == "failed" and not is_configured:
+            merged_status = "unconfigured"
+        elif raw_status == "failed" and is_configured:
+            merged_status = "failed"
+        else:
+            merged_status = raw_status
+        items.append(f"{t.name:<35} [{merged_status}]")
 
     idx = _run_selection_menu(
         items,
